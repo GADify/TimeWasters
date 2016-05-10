@@ -1,0 +1,37 @@
+
+TimeWasters is a bash script that allows you to block a set of domains 
+system-wide on your Mac. 
+
+It will work on any Linux system, though there are Growl notifications 
+included that use AppleScript, and will likely throw errors if not on a Mac. 
+
+TimeWasters uses a config file found in /etc/timewasters.conf. This file 
+contains a list of domains that will routed to localhost when blocked.
+
+TimeWasters takes the list of domains found in the config-file and installs
+them into /etc/hosts where it points them to 127.0.0.1 (localhost). Since 
+/etc/hosts overrides DNS on a Linux (or FreeBSD) system, this has the effect
+of blocking the domain from your system. 
+
+Note that this is not fool-proof, as some apps bypass system DNS alltogether, 
+which is disgusting (IMHO). One such example is Tumblr. 
+
+Since this is a domain-level blocking, it is far more useful than any browser
+plugin. With a browser plugin, you can get around it simply by using a different
+browser. Install a browser plugin in Firefox, and it has no effect in Chrome. 
+TimeWasters affects *all* applications. If you block google.com, gmail will 
+stop, maps will stop, Google docs will stop, and anything else that uses 
+the google.com domain will stop working, regardless of the application used.
+
+Note that timewasters will work from Cron, but since it needs sudo, you'll be 
+tempted to put it into root's cron. It will work fine, except the growl 
+notification will not show on your screen when it runs. 
+
+TimeWasters was written on March 29th, 2015 by Gary A. Donahue (GAD)  
+
+To install timewasters so that it works as a sytem command, run the following 
+command from the directory where you downloaded these scripts: 
+
+sudo ./install.sh
+
+This will put the main files into /usr/local/bin/ and the config file in /etc/

@@ -1,0 +1,390 @@
+#!/bin/bash
+
+# TimeWasters (timewasters)
+
+# This script blocks domains on a system-wide level by installing the entries from 
+# the config file (/etc/timewasters.conf) into /etc/hosts where it redirects them
+# to localhost, thus preventing those domains from sucking all the time from your day.
+
+# Gary A. Donahue (GAD), March 29th, 2015
+
+# Command-line Arguments
+COMMAND=${1-none}
+HOURS=$2
+
+# Split OS version for testing
+# This is done because the Growl Alerts don't work on 10.8, but they do work on 10.9
+
+OS_VER=$(/usr/bin/sw_vers -productVersion)
+OS1=$(echo $OS_VER | cut -d. -f1)
+OS2=$(echo $OS_VER | cut -d. -f2)
+OS3=$(echo $OS_VER | cut -d. -f3)
+
+MINOS="no"
+if [ $OS1 -ge 10 ]; then
+   if [ $OS2 -ge 9 ]; then
+      MINOS="yes"
+   fi
+fi
+
+MINOS="yes"
+        
+# File Locations
+CONFIG_FILE='/etc/timewasters.conf'
+TOUCH_FILE='/etc/timewasters.touch'
+SCRIPT='/usr/local/bin/timewasters'
+PIDFILE="$HOME/.TimeWasters.pid"
+ENDTIMEFILE="$HOME/.TimeWastersEnd"
+
+case "$COMMAND" in 
+
+ unblock | -u )
+
+    if [ -e "$PIDFILE" ]
+      then
+           echo 
+           echo 'Cannot UNBLOCK: Timed UNBLOCK in progress. Exiting.'
+           echo
+           exit
+    fi
+
+    if grep --quiet TimeWaster /etc/hosts
+        then
+           echo
+           echo 'Unblocking all sites blocked by TimeWasters... '
+           if sed -ie '/TimeWasters-START/,/TimeWasters-END/d' /etc/hosts
+              then
+                 echo
+                 if rm -f $PIDFILE > /dev/null 2>&1
+                    then
+                      echo "PID File Removed."
+                    else
+                      echo
+                      echo "Cannot Clear PID file!"
+                      echo
+                 fi
+                 if rm -f $ENDTIMEFILE > /dev/null 2>&1
+                    then
+                       echo "END-Time File Removed."
+                    else
+                       echo
+                       echo "Cannot Clear END-Time File."
+                       echo
+                 fi
+                 # Applescript to send Growl Notification
+                 if [ $MINOS == "yes" ]; then
+                    /usr/bin/osascript -e 'display notification "Time Wasters UNBLOCKED" with title "TimeWasters" sound name "default"'
+                 fi 
+                 echo "Done!"
+                 echo
+              else
+                 echo
+                 echo "Failed: Try sudo."
+                 echo
+                 exit 126
+           fi
+        else
+           echo
+           echo 'No TimeWaster entries activated - quitting'
+           echo
+           exit 2
+    fi
+ ;;
+
+ unblockin | -i )
+    if [ -e "$PIDFILE" ]
+        then
+           echo
+           echo 'Timed UNBLOCK already in progress. Exiting.'
+           echo
+           exit
+    fi
+
+    # Test if sudo'd
+    if touch $TOUCH_FILE
+       then
+          rm $TOUCH_FILE
+          # Make sure HOURS is numeric - decimal is OK (.5 hrs, etc.)
+          RE='^[0-9]*([.][0-9]+)?$'
+          if ! [[ $HOURS =~ $RE ]]
+             then
+                echo
+                echo 'Invalid hours specified: Exiting'
+                echo
+                exit 1
+             else
+                if grep --quiet TimeWaster /etc/hosts
+                   then
+                      echo $$ > $PIDFILE
+                      # If script is killed, delete the PID-File
+                      trap 'rm -f rm -f $PIDFILE' EXIT
+                      SECONDS=$(awk "BEGIN {print $HOURS*3600}")
+                      echo
+                      UNBLOCK_TIME=$(date -v +"$SECONDS"S  +"%B %b %d, at %I:%M:%S %p")
+                      echo $UNBLOCK_TIME > $ENDTIMEFILE
+                      echo -n "Sleeping until $UNBLOCK_TIME"
+                      echo
+                      if [ $MINOS == "yes" ]; then
+                         /usr/bin/osascript -e "display notification  \"Time Wasters BLOCKED until $UNBLOCK_TIME\"  with title \"TimeWasters\""
+                      fi 
+
+                      sleep $SECONDS
+                      rm -f $PIDFILE 
+                      /usr/local/bin/timewasters unblock
+                      exit
+                   else
+                      echo
+                      echo 'No TimeWaster entries activated - quitting'
+                      echo
+                      exit 2
+                fi
+          fi
+       else
+          echo
+          echo "Failed: Try sudo."
+          echo
+          exit 126
+    fi
+ ;;
+
+ blockfor | -f )
+
+   # Make sure HOURS is numeric - decimal is OK (.5 hrs, etc.)
+
+   RE='^[0-9]*([.][0-9]+)?$'
+   if ! [[ $HOURS =~ $RE ]] 
+     then
+       echo 
+       echo 'Invalid hours specified: Exiting'
+       echo
+       exit 1
+     else
+         if /usr/local/bin/timewasters block
+            then
+               #sudo /usr/local/bin/timewasters unblockin $HOURS &
+               sudo /usr/local/bin/timewasters unblockin $HOURS > /dev/null 2>&1 &
+               exit
+            else
+               echo 
+               echo 'Block Failed: exiting'
+               echo
+               exit 126
+         fi
+   exit
+   fi
+
+   ;;
+   
+ block | -b )
+
+    if grep --quiet TimeWaster /etc/hosts
+        then
+           echo
+           echo 'TimeWasters already activated - quitting'
+           echo
+           exit 2
+        else
+           echo
+           echo "Writing block entries from $CONFIG_FILE... "
+          
+           # Write a comment to the end of /etc/hosts as a guidepost 
+           if echo '## TimeWasters-START' >> /etc/hosts
+              then
+                 echo 'Step 1: Done!'
+              else
+                 echo
+                 echo 'Failed: Try sudo.'
+                 echo
+                 exit 126 
+           fi
+           
+           # Append the meaningful lines from config (no comments or blanks) to /etc/hosts prefixed with localhost
+           #if sed -e '1,/TimeWasters-START/d' $CONFIG_FILE | sed -e '1,$s/^/127.0.0.1 /' >> /etc/hosts
+           if grep -e '^[^#|$]'  $CONFIG_FILE | sed -e '1,$s/^/127.0.0.1 /' >> /etc/hosts
+              then
+                 echo 'Step 2: Done!'
+              else
+                 echo '^G'
+                 echo 'Failed: Try sudo.'
+                 echo
+                 exit 126
+           fi
+
+           # Do the same thing again, but add www. to each domain
+           #if sed -e '1,/TimeWasters-START/d' $CONFIG_FILE | sed -e '1,$s/^/127.0.0.1 www./' >> /etc/hosts
+           if grep -e '^[^#|$]'  $CONFIG_FILE | sed -e '1,$s/^/127.0.0.1 www./' >> /etc/hosts
+              then
+                 echo 'Step 3: Done!'
+              else
+                 echo
+                 echo 'Failed: Try sudo.'
+                 echo
+                 exit 126
+           fi 
+           
+           if echo '## TimeWasters-END' >> /etc/hosts
+              then
+                 # Applescript to send Growl Notification
+                 if [ $MINOS == "yes" ]; then
+                    /usr/bin/osascript -e 'display notification "Time Wasters BLOCKED" with title "TimeWasters"'
+                 fi 
+                 echo 'Step 4: Done!'
+              else
+                 echo
+                 echo 'Failed: Try sudo.'
+                 echo
+                 exit 126
+           fi
+           
+           echo 'Done!'
+           echo
+    fi
+    ;;
+
+ clear | -c )
+    echo 
+    echo -n "Are you sure you don't have work to do? [yes|no]: "
+    read YESNO
+    if [ "$YESNO" == 'yes' ]; then
+       echo
+       echo -n "Are you really sure? [yes|no]: "
+       read YESNO2
+       if [ "$YESNO2" != 'yes' ]; then
+          echo
+          exit
+       fi
+       else
+          echo
+          exit
+    fi
+    
+
+    # Delete the End-Time file (not critical - just waste it)
+    if [ -e "$ENDTIMEFILE" ]
+       then
+          if rm -f $ENDTIMEFILE > /dev/null 2>&1
+             then
+                echo
+                echo "END-Time File Removed."
+             else
+                echo
+                echo "Cannot Clear END-Time File."
+                echo
+          fi 
+    fi
+
+    if [ -e "$PIDFILE" ]
+       then
+          if kill -9 $(<"$PIDFILE") > /dev/null 2>&1 
+             then
+                # We killed the sleeping process, so delete the PID file
+                rm -f $PIDFILE
+                echo
+                echo "PID Killed, PID File Removed"
+             else
+                # The process doesn't exist, but the PID File does - delete it
+                if rm -f $PIDFILE > /dev/null 2>&1
+                   then 
+                      echo
+                      echo "PID File Removed."
+                   else
+                      echo
+                      echo "Cannot Clear PID file!"
+                      echo
+                fi
+          fi
+    fi
+
+    # Delete the actual block entries
+    sudo /usr/local/bin/timewasters unblock
+
+ ;;
+
+ status | -s )
+    echo
+    echo "----------------------------"
+    if [ -e "$CONFIG_FILE" ]
+      then
+         echo "TimeWasters Config:      [ ok ]"
+      else
+         echo "TimeWasters Config:      [ Missing! ]"
+    fi
+
+    if [ -e "$PIDFILE" ]
+      then
+         PID=$(<"$PIDFILE")
+         echo "PID File:                [ found ]"
+         echo "PID File contents:       [ $PID ]" 
+         if ps -p $PID > /dev/null 2>&1
+            then
+               echo -n "PID "
+               printf "%5s" "$PID"
+               echo ":               [ active ]"
+            else
+               if [ PID == "" ]
+                  then 
+                     PID = "     "
+               fi
+               echo "PID $PID:               [ NOT active ]"
+         fi
+      else
+         echo "PID File:                [ Not found ]"
+    fi
+
+
+    if [ -e "$ENDTIMEFILE" ]
+      then
+         echo "END-Time File:           [ found ]"
+         echo "END-Time File contents:  [ $(<"$ENDTIMEFILE") ]"
+      else
+         echo "END-Time File:           [ Not found ]"
+    fi
+
+
+    if grep --quiet TimeWaster /etc/hosts
+       then
+         echo 'TimeWaster entries:      [ active ] '
+       else
+         echo 'TimeWaster entries:      [ inactive ] '
+    fi
+
+    echo "----------------------------"
+    echo
+
+ ;;
+
+ * | help | --help )
+    # Help output
+    echo
+    echo "TimeWasters will block all of the domains listed in $CONFIG_FILE."
+    echo "TimeWasters is system-wide, so it works on every application. "
+    echo "            That means if you block google.com, gmail will stop"
+    echo "            working, too, even if you use Outlook."
+    echo
+    echo "timewasters <option> <hours>"
+    echo
+    echo "   timewasters [-b|block]      BLOCK domains from $CONFIG_FILE"
+    echo
+    echo "   timewasters [-f|blockfor] <hours>"
+    echo "                               BLOCK domains for <hours> (1,4,.5, etc.)"
+    echo
+    echo "   timewasters [-u|unblock]    UNBLOCK domains from $CONFIG_FILE"
+    echo
+    echo "   timewasters [-i|unblockin] <hours>"
+    echo "                               UNLOCK domains in <hours> (1,4,.5, etc.)"
+    echo
+    echo "   timewasters [-s|status]     Display status of all traces of TimeWasters"
+    echo
+    echo "   timewasters [-h|help]       Display this message"
+    echo
+    echo "   timewasters [-c|clear]      Clear all traces of TimeWasters"
+    echo
+    echo "   timewasters                 Display this message"
+    echo
+    echo "NOTE: Sites may continue to work for a short while until the app's cache expires."
+    echo
+    echo "Written by Gary A. Donahue (GAD) on March 29th, 2015"
+    echo
+    exit
+    ;;
+esac
